@@ -59,6 +59,7 @@ router.get("/summary", async(req, res) => {
                     name: req.doctor.name,
                     specialty: req.doctor.specialty,
                     available: req.doctor.available,
+                    approved: req.doctor.approved !== false,
                 },
                 summary,
             },

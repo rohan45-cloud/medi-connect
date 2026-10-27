@@ -3,6 +3,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const User = require("../models/User");
+const Doctor = require("../models/Doctor");
 const rateLimit = require("../middleware/rateLimit");
 const notify = require("../utils/notify");
 
@@ -104,6 +105,82 @@ router.post("/register", registerLimiter, async(req, res) => {
             success: false,
             message: "Registration failed. Please try again.",
         });
+    }
+});
+
+// Register as a DOCTOR (an application): creates the login + a doctor profile that stays HIDDEN
+// from patients until an admin approves it in the Admin panel.
+router.post("/register-doctor", registerLimiter, async(req, res) => {
+    let createdUser = null;
+    try {
+        const { name, email, password, specialty, city, experience, consultationFee } = req.body;
+
+        if (typeof name !== "string" || typeof email !== "string" || typeof password !== "string" || typeof specialty !== "string") {
+            return res.status(400).json({ success: false, message: "Name, email, password and specialty are required." });
+        }
+        const cleanName = name.trim();
+        const cleanEmail = email.trim().toLowerCase();
+        const cleanSpecialty = specialty.trim();
+
+        if (cleanName.length < 2 || cleanName.length > 80) {
+            return res.status(400).json({ success: false, message: "Name must be between 2 and 80 characters." });
+        }
+        if (!cleanSpecialty || cleanSpecialty.length > 60) {
+            return res.status(400).json({ success: false, message: "Please enter your specialty (under 60 characters)." });
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+            return res.status(400).json({ success: false, message: "Please enter a valid email address." });
+        }
+        if (password.length < 8 || password.length > 72) {
+            return res.status(400).json({ success: false, message: "Password must be 8–72 characters long." });
+        }
+
+        const fee = consultationFee === undefined || consultationFee === "" ? 500 : Number(consultationFee);
+        const exp = experience === undefined || experience === "" ? 1 : Number(experience);
+        if (!Number.isFinite(fee) || fee < 0 || fee > 100000) {
+            return res.status(400).json({ success: false, message: "Fee must be between 0 and 100000." });
+        }
+        if (!Number.isFinite(exp) || exp < 0 || exp > 70) {
+            return res.status(400).json({ success: false, message: "Experience must be between 0 and 70 years." });
+        }
+        if (city !== undefined && (typeof city !== "string" || city.length > 60)) {
+            return res.status(400).json({ success: false, message: "City must be under 60 characters." });
+        }
+
+        if (await User.findOne({ email: cleanEmail })) {
+            return res.status(409).json({ success: false, message: "An account with this email already exists." });
+        }
+
+        createdUser = await User.create({
+            name: cleanName,
+            email: cleanEmail,
+            password: await bcrypt.hash(password, 12),
+            role: "doctor",
+        });
+
+        await Doctor.create({
+            name: cleanName,
+            specialty: cleanSpecialty,
+            city: (city || "").trim(),
+            experience: Math.round(exp),
+            consultationFee: Math.round(fee),
+            approved: false, // hidden until an admin approves
+            user: createdUser._id,
+        });
+
+        return res.status(201).json({
+            success: true,
+            message: "Application received. An admin will review it before patients can see you.",
+            token: createToken(createdUser),
+            user: { id: createdUser._id, name: createdUser.name, email: createdUser.email, role: createdUser.role },
+        });
+    } catch (error) {
+        if (createdUser) await User.deleteOne({ _id: createdUser._id }).catch(() => {});
+        if (error.code === 11000) {
+            return res.status(409).json({ success: false, message: "An account with this email already exists." });
+        }
+        console.error("Doctor register error:", error.message);
+        return res.status(500).json({ success: false, message: "Could not submit the application. Please try again." });
     }
 });
 

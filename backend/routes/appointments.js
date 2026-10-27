@@ -1,42 +1,24 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const Doctor = require("../models/Doctor");
+const User = require("../models/User");
 const Appointment = require("../models/Appointment");
+const Review = require("../models/Review");
 const requireAuth = require("../middleware/auth");
+const { allTimes, worksOn } = require("../utils/schedule");
+const notify = require("../utils/notify");
 
 const router = express.Router();
 
 // ---------- clinic rules (change these if you like) ----------
-const OPEN_TIME = "10:00";
-const CLOSE_TIME = "17:00";
-const SLOT_MINUTES = 30;
-const BREAK_START = "13:00"; // lunch: no slots from 13:00 to 14:00
-const BREAK_END = "14:00";
+// Opening hours / slot length / lunch break are now set PER DOCTOR (see utils/schedule.js)
 const MAX_DAYS_AHEAD = 30;
 const MIN_LEAD_MINUTES = 30; // can't book a slot starting in less than 30 min
-const CANCEL_CUTOFF_MINUTES = 120; // can cancel up to 2 hours before the visit
+const CANCEL_CUTOFF_MINUTES = 120; // can cancel / reschedule up to 2 hours before
 const TIME_ZONE = "Asia/Kolkata";
 const IST_OFFSET = "+05:30";
 
 // ---------- small helpers ----------
-const toMinutes = (t) => {
-    const [h, m] = t.split(":").map(Number);
-    return h * 60 + m;
-};
-
-const pad = (n) => String(n).padStart(2, "0");
-
-// All possible times in a day, e.g. ["10:00", "10:30", ...] (lunch removed)
-function allTimes() {
-    const times = [];
-    for (let m = toMinutes(OPEN_TIME); m + SLOT_MINUTES <= toMinutes(CLOSE_TIME); m += SLOT_MINUTES) {
-        const overlapsBreak = m < toMinutes(BREAK_END) && m + SLOT_MINUTES > toMinutes(BREAK_START);
-        if (overlapsBreak) continue;
-        times.push(`${pad(Math.floor(m / 60))}:${pad(m % 60)}`);
-    }
-    return times;
-}
-
 // Today's date in India, "YYYY-MM-DD"
 function todayIST() {
     return new Intl.DateTimeFormat("en-CA", { timeZone: TIME_ZONE }).format(new Date());
@@ -73,6 +55,21 @@ function fail(res, status, message) {
     return res.status(status).json({ success: false, message });
 }
 
+// Checks date + time against this doctor's schedule. Returns an error message or null.
+function slotProblem(doctor, date, time) {
+    const problem = dateProblem(date);
+    if (problem) return problem;
+    if (!worksOn(doctor, date)) return "This doctor doesn't work on that day.";
+    if (typeof time !== "string" || !allTimes(doctor).includes(time)) return "Please choose a valid time slot.";
+    if (startAtFor(date, time).getTime() < Date.now() + MIN_LEAD_MINUTES * 60000) {
+        return "That time is too soon or already passed.";
+    }
+    return null;
+}
+
+// a doctor patients are allowed to book
+const bookable = (doctor) => doctor && doctor.approved !== false;
+
 // every route below needs a logged-in user
 router.use(requireAuth);
 
@@ -86,18 +83,22 @@ router.get("/slots", async(req, res) => {
         if (problem) return fail(res, 400, problem);
 
         const doctor = await Doctor.findById(doctorId);
-        if (!doctor) return fail(res, 404, "Doctor not found.");
+        if (!bookable(doctor)) return fail(res, 404, "Doctor not found.");
         if (!doctor.available) return fail(res, 409, "This doctor is currently unavailable.");
+
+        if (!worksOn(doctor, date)) {
+            return res.json({ success: true, data: { date, slots: [], closed: true } });
+        }
 
         const booked = await Appointment.find({ doctor: doctor._id, date, active: true }).select("time");
         const taken = new Set(booked.map((a) => a.time));
         const earliest = Date.now() + MIN_LEAD_MINUTES * 60000;
 
-        const slots = allTimes().filter(
+        const slots = allTimes(doctor).filter(
             (time) => !taken.has(time) && startAtFor(date, time).getTime() >= earliest
         );
 
-        return res.json({ success: true, data: { date, slots } });
+        return res.json({ success: true, data: { date, slots, closed: false } });
     } catch (error) {
         console.error("Slots error:", error.message);
         return fail(res, 500, "Could not load time slots.");
@@ -107,30 +108,25 @@ router.get("/slots", async(req, res) => {
 // ---------- POST /api/appointments  { doctorId, date, time, reason } ----------
 router.post("/", async(req, res) => {
     try {
-        if (req.userRole === "doctor") {
-            return fail(res, 403, "Doctor accounts can't book appointments. Please use a patient account.");
+        if (req.userRole !== "patient") {
+            return fail(res, 403, "Only patient accounts can book appointments.");
         }
 
         const { doctorId, date, time, reason } = req.body;
 
         if (!mongoose.isValidObjectId(doctorId)) return fail(res, 400, "Invalid doctor.");
-        const problem = dateProblem(date);
-        if (problem) return fail(res, 400, problem);
-        if (typeof time !== "string" || !allTimes().includes(time)) {
-            return fail(res, 400, "Please choose a valid time slot.");
-        }
         if (reason !== undefined && (typeof reason !== "string" || reason.length > 300)) {
             return fail(res, 400, "Reason must be under 300 characters.");
         }
 
-        const startAt = startAtFor(date, time);
-        if (startAt.getTime() < Date.now() + MIN_LEAD_MINUTES * 60000) {
-            return fail(res, 400, "That time is too soon or already passed.");
-        }
-
         const doctor = await Doctor.findById(doctorId);
-        if (!doctor) return fail(res, 404, "Doctor not found.");
+        if (!bookable(doctor)) return fail(res, 404, "Doctor not found.");
         if (!doctor.available) return fail(res, 409, "This doctor is currently unavailable.");
+
+        const problem = slotProblem(doctor, date, time);
+        if (problem) return fail(res, 400, problem);
+
+        const startAt = startAtFor(date, time);
 
         // one person can't be in two places at once
         const clash = await Appointment.exists({ patient: req.userId, startAt, active: true });
@@ -155,6 +151,9 @@ router.post("/", async(req, res) => {
             throw error;
         }
 
+        const patient = await User.findById(req.userId).select("name email");
+        if (patient) notify.bookingConfirmed(appointment, patient, doctor);
+
         await appointment.populate("doctor", "name specialty");
         return res.status(201).json({
             success: true,
@@ -175,11 +174,16 @@ router.get("/me", async(req, res) => {
             .populate("doctor", "name specialty");
 
         const now = Date.now();
-        const data = appointments.map((a) => ({
-            ...a.toObject(),
-            canCancel: a.status === "booked" &&
-                a.startAt.getTime() - now >= CANCEL_CUTOFF_MINUTES * 60000,
-        }));
+        const data = appointments.map((a) => {
+            const changeable = a.status === "booked" && a.startAt.getTime() - now >= CANCEL_CUTOFF_MINUTES * 60000;
+            return {
+                ...a.toObject(),
+                canCancel: changeable,
+                canReschedule: changeable,
+                canReview: a.status === "completed" && !a.reviewed,
+                canPay: a.status === "booked" && a.paymentStatus === "unpaid" && a.fee > 0,
+            };
+        });
 
         return res.json({ success: true, count: data.length, data });
     } catch (error) {
@@ -197,6 +201,7 @@ router.patch("/:id/cancel", async(req, res) => {
         const appointment = await Appointment.findOne({ _id: req.params.id, patient: req.userId });
         if (!appointment) return fail(res, 404, "Appointment not found.");
         if (appointment.status === "cancelled") return fail(res, 409, "This appointment is already cancelled.");
+        if (appointment.status !== "booked") return fail(res, 409, `This appointment is already ${appointment.status}.`);
 
         const minutesLeft = (appointment.startAt.getTime() - Date.now()) / 60000;
         if (minutesLeft < CANCEL_CUTOFF_MINUTES) {
@@ -206,12 +211,127 @@ router.patch("/:id/cancel", async(req, res) => {
         appointment.status = "cancelled";
         appointment.active = false; // frees the slot for other people
         appointment.cancelledAt = new Date();
+        appointment.cancelledBy = "patient";
+        if (appointment.paymentStatus === "paid") appointment.paymentStatus = "refund-pending";
         await appointment.save();
+
+        const [patient, doctor] = await Promise.all([
+            User.findById(req.userId).select("name email"),
+            Doctor.findById(appointment.doctor),
+        ]);
+        if (patient && doctor) notify.cancelled(appointment, patient, doctor, "patient");
 
         return res.json({ success: true, message: "Appointment cancelled.", data: appointment });
     } catch (error) {
         console.error("Cancel error:", error.message);
         return fail(res, 500, "Could not cancel the appointment.");
+    }
+});
+
+// ---------- PATCH /api/appointments/:id/reschedule  { date, time } ----------
+router.patch("/:id/reschedule", async(req, res) => {
+    try {
+        if (!mongoose.isValidObjectId(req.params.id)) return fail(res, 404, "Appointment not found.");
+
+        const appointment = await Appointment.findOne({ _id: req.params.id, patient: req.userId });
+        if (!appointment) return fail(res, 404, "Appointment not found.");
+        if (appointment.status !== "booked") return fail(res, 409, "Only upcoming appointments can be rescheduled.");
+
+        const minutesLeft = (appointment.startAt.getTime() - Date.now()) / 60000;
+        if (minutesLeft < CANCEL_CUTOFF_MINUTES) {
+            return fail(res, 409, `Appointments can only be changed up to ${CANCEL_CUTOFF_MINUTES / 60} hours before the visit.`);
+        }
+
+        const { date, time } = req.body;
+        const doctor = await Doctor.findById(appointment.doctor);
+        if (!bookable(doctor)) return fail(res, 404, "Doctor not found.");
+        if (!doctor.available) return fail(res, 409, "This doctor is currently unavailable.");
+
+        const problem = slotProblem(doctor, date, time);
+        if (problem) return fail(res, 400, problem);
+
+        const startAt = startAtFor(date, time);
+        if (startAt.getTime() === appointment.startAt.getTime()) {
+            return fail(res, 400, "That is already your appointment time.");
+        }
+
+        const clash = await Appointment.exists({
+            patient: req.userId,
+            startAt,
+            active: true,
+            _id: { $ne: appointment._id },
+        });
+        if (clash) return fail(res, 409, "You already have an appointment at this time.");
+
+        appointment.date = date;
+        appointment.time = time;
+        appointment.startAt = startAt;
+        appointment.reminderSent = false;
+
+        try {
+            await appointment.save(); // the unique index protects the new slot too
+        } catch (error) {
+            if (error.code === 11000) {
+                return fail(res, 409, "Sorry, that slot was just booked by someone else. Please pick another time.");
+            }
+            throw error;
+        }
+
+        const patient = await User.findById(req.userId).select("name email");
+        if (patient) notify.rescheduled(appointment, patient, doctor);
+
+        return res.json({ success: true, message: "Appointment rescheduled.", data: appointment });
+    } catch (error) {
+        console.error("Reschedule error:", error.message);
+        return fail(res, 500, "Could not reschedule the appointment.");
+    }
+});
+
+// ---------- POST /api/appointments/:id/review  { rating, comment } ----------
+router.post("/:id/review", async(req, res) => {
+    try {
+        if (!mongoose.isValidObjectId(req.params.id)) return fail(res, 404, "Appointment not found.");
+
+        const rating = Number(req.body.rating);
+        const comment = typeof req.body.comment === "string" ? req.body.comment.trim() : "";
+        if (!Number.isInteger(rating) || rating < 1 || rating > 5) return fail(res, 400, "Please give 1 to 5 stars.");
+        if (comment.length > 400) return fail(res, 400, "Comment must be under 400 characters.");
+
+        const appointment = await Appointment.findOne({ _id: req.params.id, patient: req.userId });
+        if (!appointment) return fail(res, 404, "Appointment not found.");
+        if (appointment.status !== "completed") return fail(res, 409, "You can review a visit after it is completed.");
+        if (appointment.reviewed) return fail(res, 409, "You already reviewed this visit.");
+
+        try {
+            await Review.create({
+                appointment: appointment._id,
+                patient: req.userId,
+                doctor: appointment.doctor,
+                rating,
+                comment,
+            });
+        } catch (error) {
+            if (error.code === 11000) return fail(res, 409, "You already reviewed this visit.");
+            throw error;
+        }
+
+        appointment.reviewed = true;
+        await appointment.save();
+
+        // recompute the doctor's average from real reviews
+        const all = await Review.find({ doctor: appointment.doctor });
+        const doctor = await Doctor.findById(appointment.doctor);
+        if (doctor && all.length) {
+            const avg = all.reduce((sum, r) => sum + r.rating, 0) / all.length;
+            doctor.rating = Math.round(avg * 10) / 10;
+            doctor.reviewCount = all.length;
+            await doctor.save();
+        }
+
+        return res.status(201).json({ success: true, message: "Thanks for your review!" });
+    } catch (error) {
+        console.error("Review error:", error.message);
+        return fail(res, 500, "Could not save your review.");
     }
 });
 

@@ -2,11 +2,14 @@ import { useCallback, useEffect, useState } from "react";
 import { X, Stethoscope, CheckCircle2, UserX, Ban } from "lucide-react";
 import { apiFetch } from "./api";
 import { formatTime } from "./BookingModal";
+import { ProfileTab, ScheduleTab } from "./DoctorSettings";
 
 const TABS = [
   ["today", "Today"],
   ["upcoming", "Upcoming"],
   ["history", "History"],
+  ["profile", "Profile"],
+  ["schedule", "Schedule"],
 ];
 
 function formatDate(dateStr) {
@@ -59,8 +62,11 @@ export default function DoctorDashboard({ onClose, onChanged, onAuthError }) {
     []
   );
 
+  const isListTab = ["today", "upcoming", "history"].includes(tab);
+
   useEffect(() => {
-    load(tab);
+    if (isListTab) load(tab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, load]);
 
   async function changeStatus(a, status) {
@@ -141,6 +147,13 @@ export default function DoctorDashboard({ onClose, onChanged, onAuthError }) {
           </div>
         )}
 
+        {info && info.doctor.approved === false && (
+          <p className="booking-error" role="status">
+            Your profile is waiting for admin approval. Patients can't see or book you yet.
+            You can fill in your profile and schedule meanwhile.
+          </p>
+        )}
+
         {s && (
           <div className="dash-cards">
             <div><strong>{s.today}</strong><span>Today</span></div>
@@ -171,7 +184,10 @@ export default function DoctorDashboard({ onClose, onChanged, onAuthError }) {
           </p>
         )}
 
-        {loading ? (
+        {tab === "profile" && <ProfileTab onChanged={onChanged} onAuthError={onAuthError} />}
+        {tab === "schedule" && <ScheduleTab onChanged={onChanged} onAuthError={onAuthError} />}
+
+        {!isListTab ? null : loading ? (
           <p className="booking-hint">Loading...</p>
         ) : list.length === 0 ? (
           <p className="booking-hint">No appointments here.</p>

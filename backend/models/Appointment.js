@@ -29,6 +29,14 @@ const appointmentSchema = new mongoose.Schema({
     cancelledAt: { type: Date },
     // who cancelled (empty = the patient, for older records)
     cancelledBy: { type: String, enum: ["patient", "doctor"] },
+    // payment (Razorpay). "refund-pending" = paid, then cancelled: clinic refunds manually
+    paymentStatus: { type: String, enum: ["unpaid", "paid", "refund-pending"], default: "unpaid" },
+    razorpayOrderId: { type: String },
+    paymentId: { type: String },
+    // email reminder already sent?
+    reminderSent: { type: Boolean, default: false },
+    // patient already left a review?
+    reviewed: { type: Boolean, default: false },
 }, { timestamps: true });
 
 // THE double-booking guard.

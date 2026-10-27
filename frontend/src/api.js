@@ -1,4 +1,4 @@
-export const API_URL = "https://medi-connect-22m3.onrender.com";
+export const API_URL = "https://medi-connect-22m3.onrender.com/api";
 export const TOKEN_KEY = "mediconnect_token";
 export const USER_KEY = "mediconnect_user";
 

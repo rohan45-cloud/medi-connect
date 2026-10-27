@@ -23,7 +23,7 @@ import DoctorReviews from "./DoctorReviews";
 import { apiFetch } from "./api";
 import "./index.css";
 
-const API_URL = "https://medi-connect-22m3.onrender.com";
+const API_URL = "https://medi-connect-22m3.onrender.com/api";
 
 export default function App() {
   const [doctors, setDoctors] = useState([]);

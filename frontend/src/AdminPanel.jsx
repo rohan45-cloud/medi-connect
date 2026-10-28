@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { X, ShieldCheck } from "lucide-react";
-import { apiFetch } from "./api";
+import { X, ShieldCheck, Download, FileText } from "lucide-react";
+import { apiFetch, apiDownload } from "./api";
 
 const TABS = [
   ["doctors", "Doctors"],
   ["users", "Users"],
   ["appointments", "Appointments"],
+  ["refunds", "Refunds"],
 ];
 
 const EMPTY = { name: "", email: "", specialty: "", city: "", experience: "", consultationFee: "" };
@@ -40,17 +41,41 @@ export default function AdminPanel({ onClose, onChanged, onAuthError }) {
     load(tab);
   }, [tab, load]);
 
-  async function setApproved(doctor, approved) {
+  // runs a button action, shows its error in the panel, reloads the list
+  async function act(task, reloadTab) {
     try {
       setError("");
-      const res = await apiFetch(`/admin/doctors/${doctor._id}`, { method: "PATCH", body: { approved } });
-      onChanged(res.message);
-      await load("doctors");
+      await task();
+      await load(reloadTab || tab);
     } catch (err) {
       if (err.status === 401) return onAuthError();
       setError(err.message);
     }
   }
+
+  const setApproved = (doctor, approved) =>
+    act(async () => {
+      const res = await apiFetch(`/admin/doctors/${doctor._id}`, { method: "PATCH", body: { approved } });
+      onChanged(res.message);
+    });
+
+  const setBlocked = (user, blocked) => {
+    if (blocked && !window.confirm(`Block ${user.name}? They will not be able to log in.`)) return;
+    return act(async () => {
+      const res = await apiFetch(`/admin/users/${user._id}`, { method: "PATCH", body: { blocked } });
+      onChanged(res.message);
+    });
+  };
+
+  const markRefunded = (row) => {
+    if (!window.confirm(`Have you already refunded ₹${row.fee} to ${row.patient} in the Razorpay dashboard?`)) return;
+    return act(async () => {
+      const res = await apiFetch(`/admin/appointments/${row._id}/refund`, { method: "PATCH" });
+      onChanged(res.message);
+    });
+  };
+
+  const download = (path, filename) => act(() => apiDownload(path, filename), tab);
 
   async function addDoctor(e) {
     e.preventDefault();
@@ -93,7 +118,7 @@ export default function AdminPanel({ onClose, onChanged, onAuthError }) {
 
         {s && (
           <div className="dash-cards">
-            <div><strong>{s.patients}</strong><span>Patients</span></div>
+            <div><strong>{s.patients}</strong><span>Patients{s.blockedUsers ? ` (${s.blockedUsers} blocked)` : ""}</span></div>
             <div><strong>{s.doctors}</strong><span>Doctors{s.pendingDoctors ? ` (${s.pendingDoctors} hidden)` : ""}</span></div>
             <div><strong>{s.appointments}</strong><span>Appointments</span></div>
             <div><strong>₹{s.revenue}</strong><span>Paid online{s.refundsPending ? ` · ${s.refundsPending} refund(s) due` : ""}</span></div>
@@ -111,6 +136,7 @@ export default function AdminPanel({ onClose, onChanged, onAuthError }) {
               onClick={() => setTab(key)}
             >
               {label}
+              {key === "refunds" && s?.refundsPending ? ` (${s.refundsPending})` : ""}
             </button>
           ))}
         </div>
@@ -142,6 +168,40 @@ export default function AdminPanel({ onClose, onChanged, onAuthError }) {
           </form>
         )}
 
+        {tab === "appointments" && (
+          <div className="csv-bar">
+            <button
+              type="button"
+              className="button button-outline"
+              onClick={() => download("/admin/export/appointments", "mediconnect-appointments.csv")}
+            >
+              <Download size={15} /> Appointments CSV
+            </button>
+            <button
+              type="button"
+              className="button button-outline"
+              onClick={() => download("/admin/export/payments", "mediconnect-payments.csv")}
+            >
+              <Download size={15} /> Payments CSV
+            </button>
+          </div>
+        )}
+
+        {tab === "refunds" && (
+          <div className="csv-bar">
+            <button
+              type="button"
+              className="button button-outline"
+              onClick={() => download("/admin/export/refunds", "mediconnect-refunds.csv")}
+            >
+              <Download size={15} /> Refunds CSV
+            </button>
+            <span className="booking-hint">
+              Refund the money in the Razorpay dashboard first, then press "Mark refunded" here.
+            </span>
+          </div>
+        )}
+
         {loading ? (
           <p className="booking-hint">Loading...</p>
         ) : (
@@ -152,6 +212,20 @@ export default function AdminPanel({ onClose, onChanged, onAuthError }) {
                   <div>
                     <strong>{d.name}</strong>
                     <span className="appt-sub">{d.specialty}{d.city ? ` · ${d.city}` : ""} · ₹{d.consultationFee}</span>
+                    <span className="appt-sub">
+                      Registration no: {d.registrationNumber ? <strong>{d.registrationNumber}</strong> : "not given"}
+                    </span>
+                    {d.hasCredential ? (
+                      <button
+                        type="button"
+                        className="link-btn"
+                        onClick={() => download(`/admin/doctors/${d._id}/credential`, `${d.name.replace(/[^A-Za-z0-9]+/g, "-")}-document`)}
+                      >
+                        <FileText size={14} /> View uploaded document
+                      </button>
+                    ) : (
+                      <span className="appt-sub">No document uploaded</span>
+                    )}
                   </div>
                   <div className="appt-side">
                     <span className={`appt-badge ${d.approved === false ? "appt-noshow" : "appt-upcoming"}`}>
@@ -175,7 +249,19 @@ export default function AdminPanel({ onClose, onChanged, onAuthError }) {
                     <strong>{u.name}</strong>
                     <span className="appt-sub">{u.email}</span>
                   </div>
-                  <span className="appt-badge appt-past">{u.role}</span>
+                  <div className="appt-side">
+                    <span className="appt-badge appt-past">{u.role}</span>
+                    {u.blocked && <span className="appt-badge appt-cancelled">Blocked</span>}
+                    {u.role !== "admin" && (
+                      <button
+                        type="button"
+                        className={`button button-outline appt-cancel${u.blocked ? " appt-neutral" : ""}`}
+                        onClick={() => setBlocked(u, !u.blocked)}
+                      >
+                        {u.blocked ? "Unblock" : "Block"}
+                      </button>
+                    )}
+                  </div>
                 </li>
               ))}
 
@@ -183,7 +269,7 @@ export default function AdminPanel({ onClose, onChanged, onAuthError }) {
               rows.map((a) => (
                 <li key={a._id} className="appt-item">
                   <div>
-                    <strong>{a.patient || "Patient"} → {a.doctor || "Doctor"}</strong>
+                    <strong>{a.patient || "Walk-in"} → {a.doctor || "Doctor"}</strong>
                     <span className="appt-sub">{a.date} · {a.time} · ₹{a.fee}</span>
                   </div>
                   <div className="appt-side">
@@ -192,6 +278,34 @@ export default function AdminPanel({ onClose, onChanged, onAuthError }) {
                   </div>
                 </li>
               ))}
+
+            {tab === "refunds" &&
+              rows.map((r) => (
+                <li key={r._id} className="appt-item">
+                  <div>
+                    <strong>{r.patient || "Patient"} · ₹{r.fee}</strong>
+                    <span className="appt-sub">
+                      {r.doctor || "Doctor"} · {r.date} {r.time}
+                    </span>
+                    <span className="appt-sub mono">Payment id: {r.paymentId || "—"}</span>
+                  </div>
+                  <div className="appt-side">
+                    <span className={`appt-badge ${r.paymentStatus === "refunded" ? "appt-completed" : "appt-noshow"}`}>
+                      {r.paymentStatus === "refunded" ? "Refunded" : "Refund pending"}
+                    </span>
+                    {r.paymentStatus === "refund-pending" && (
+                      <button
+                        type="button"
+                        className="button button-primary appt-cancel dash-done"
+                        onClick={() => markRefunded(r)}
+                      >
+                        Mark refunded
+                      </button>
+                    )}
+                  </div>
+                </li>
+              ))}
+
             {rows.length === 0 && <p className="booking-hint">Nothing here yet.</p>}
           </ul>
         )}

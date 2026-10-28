@@ -8,6 +8,7 @@ const DEFAULT_SCHEDULE = {
     slotMinutes: 30,
     breakStart: "13:00", // "" = no break
     breakEnd: "14:00",
+    reservedTimes: [], // slots kept back for walk-ins / emergencies
 };
 
 const ALLOWED_SLOT_MINUTES = [15, 20, 30, 45, 60];
@@ -30,6 +31,7 @@ function scheduleOf(doctor) {
         slotMinutes: s.slotMinutes || DEFAULT_SCHEDULE.slotMinutes,
         breakStart: s.breakStart === undefined || s.breakStart === null ? DEFAULT_SCHEDULE.breakStart : s.breakStart,
         breakEnd: s.breakEnd === undefined || s.breakEnd === null ? DEFAULT_SCHEDULE.breakEnd : s.breakEnd,
+        reservedTimes: Array.isArray(s.reservedTimes) ? [...s.reservedTimes] : [],
     };
 }
 
@@ -52,6 +54,12 @@ function allTimes(doctor) {
         times.push(`${pad(Math.floor(m / 60))}:${pad(m % 60)}`);
     }
     return times;
+}
+
+// The times PATIENTS may book: all times minus the ones the doctor reserved for walk-ins.
+function patientTimes(doctor) {
+    const reserved = new Set(scheduleOf(doctor).reservedTimes);
+    return allTimes(doctor).filter((t) => !reserved.has(t));
 }
 
 // Checks what a doctor typed in the Schedule form.
@@ -90,10 +98,20 @@ function validateSchedule(input) {
         slotMinutes,
         breakStart,
         breakEnd,
+        reservedTimes: [],
     };
 
-    if (allTimes({ schedule: value }).length === 0) return { error: "These hours leave no bookable slots." };
+    const everyTime = allTimes({ schedule: value });
+    if (everyTime.length === 0) return { error: "These hours leave no bookable slots." };
+
+    // reserved slots: must be real slot times. Times that no longer exist (after changing hours) are dropped.
+    if (input.reservedTimes !== undefined) {
+        if (!Array.isArray(input.reservedTimes) || input.reservedTimes.some((t) => typeof t !== "string")) {
+            return { error: "Reserved slots are invalid." };
+        }
+        value.reservedTimes = [...new Set(input.reservedTimes)].filter((t) => everyTime.includes(t)).sort();
+    }
     return { value };
 }
 
-module.exports = { DEFAULT_SCHEDULE, scheduleOf, worksOn, allTimes, validateSchedule, dayOfWeek };
+module.exports = { DEFAULT_SCHEDULE, scheduleOf, worksOn, allTimes, patientTimes, validateSchedule, dayOfWeek };

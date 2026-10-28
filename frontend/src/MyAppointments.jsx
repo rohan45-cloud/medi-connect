@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { X, CalendarCheck, Star } from "lucide-react";
-import { apiFetch } from "./api";
+import { X, CalendarCheck, Star, Receipt, Paperclip, Trash2, Download, RotateCcw } from "lucide-react";
+import { apiFetch, apiUpload, apiDownload } from "./api";
 import { formatTime } from "./BookingModal";
 import { paymentsEnabled, payForAppointment } from "./payments";
 
@@ -27,9 +27,14 @@ function statusOf(appointment) {
   return ["upcoming", "Upcoming"];
 }
 
+function sizeLabel(bytes) {
+  return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 function paymentLabel(a) {
   if (a.paymentStatus === "paid") return "Paid";
   if (a.paymentStatus === "refund-pending") return "Refund pending";
+  if (a.paymentStatus === "refunded") return "Refunded";
   return null;
 }
 
@@ -39,6 +44,7 @@ export default function MyAppointments({
   onChanged,
   onAuthError,
   onReschedule,
+  onBookAgain,
 }) {
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -48,6 +54,8 @@ export default function MyAppointments({
   const [reviewing, setReviewing] = useState(null); // appointment id
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState("");
+  const [filesOpen, setFilesOpen] = useState(null); // appointment id whose files are shown
+  const [files, setFiles] = useState([]);
 
   const load = useCallback(async () => {
     try {
@@ -104,6 +112,42 @@ export default function MyAppointments({
       onChanged("Payment successful.");
       await load();
     });
+  }
+
+  // ---- reports: the patient attaches old reports / photos to an upcoming visit ----
+  async function loadFiles(id) {
+    const res = await apiFetch(`/reports/appointment/${id}`);
+    setFiles(res.data);
+  }
+
+  function toggleFiles(a) {
+    if (filesOpen === a._id) return setFilesOpen(null);
+    setFilesOpen(a._id);
+    setFiles([]);
+    run(a._id, () => loadFiles(a._id));
+  }
+
+  function handleUpload(a, event) {
+    const file = event.target.files[0];
+    event.target.value = "";
+    if (!file) return;
+    run(a._id, async () => {
+      await apiUpload(`/reports/${a._id}`, file);
+      onChanged("File attached.");
+      await loadFiles(a._id);
+    });
+  }
+
+  function handleDeleteFile(a, f) {
+    if (!window.confirm(`Remove ${f.name}?`)) return;
+    run(a._id, async () => {
+      await apiFetch(`/reports/file/${f._id}`, { method: "DELETE" });
+      await loadFiles(a._id);
+    });
+  }
+
+  function handleReceipt(a) {
+    run(a._id, () => apiDownload(`/appointments/${a._id}/receipt`, `receipt-${a._id.slice(-8)}.pdf`));
   }
 
   function handleReview(a) {
@@ -206,6 +250,26 @@ export default function MyAppointments({
                             {busy ? "Please wait..." : "Cancel"}
                           </button>
                         )}
+                        {a.canReceipt && (
+                          <button
+                            type="button"
+                            className="button button-outline appt-cancel appt-neutral"
+                            disabled={busy}
+                            onClick={() => handleReceipt(a)}
+                          >
+                            <Receipt size={14} /> Receipt
+                          </button>
+                        )}
+                        {(a.canAttach || a.status === "completed") && (
+                          <button
+                            type="button"
+                            className="button button-outline appt-cancel appt-neutral"
+                            aria-expanded={filesOpen === a._id}
+                            onClick={() => toggleFiles(a)}
+                          >
+                            <Paperclip size={14} /> Files
+                          </button>
+                        )}
                         {a.canReview && (
                           <button
                             type="button"
@@ -222,6 +286,69 @@ export default function MyAppointments({
                       </div>
                     </div>
                   </div>
+
+                  {a.status === "completed" && a.followUpDate && onBookAgain && (
+                    <div className="followup">
+                      <RotateCcw size={15} />
+                      <span>
+                        {a.doctor?.name} suggests a follow-up around <strong>{formatDate(a.followUpDate)}</strong>.
+                      </span>
+                      <button
+                        type="button"
+                        className="button button-primary appt-cancel dash-done"
+                        onClick={() => onBookAgain(a.doctor._id)}
+                      >
+                        Book again
+                      </button>
+                    </div>
+                  )}
+
+                  {filesOpen === a._id && (
+                    <div className="files-panel">
+                      <p className="booking-hint">
+                        {a.canAttach
+                          ? "Attach old reports or photos for the doctor (PDF, PNG or JPG, up to 2 MB each, max 3)."
+                          : "Files shared with the doctor for this visit."}
+                      </p>
+                      {files.length === 0 && <p className="booking-hint">No files attached.</p>}
+                      <ul className="file-list">
+                        {files.map((f) => (
+                          <li key={f._id}>
+                            <button
+                              type="button"
+                              className="link-btn"
+                              onClick={() => run(a._id, () => apiDownload(`/reports/file/${f._id}`, f.name))}
+                            >
+                              <Download size={14} /> {f.name}
+                            </button>
+                            <span className="appt-sub">{sizeLabel(f.size)}</span>
+                            {a.canAttach && (
+                              <button
+                                type="button"
+                                className="link-btn danger"
+                                aria-label={`Remove ${f.name}`}
+                                disabled={busy}
+                                onClick={() => handleDeleteFile(a, f)}
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                      {a.canAttach && files.length < 3 && (
+                        <label className="file-pick">
+                          <input
+                            type="file"
+                            accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
+                            disabled={busy}
+                            onChange={(e) => handleUpload(a, e)}
+                            aria-label="Attach a file"
+                          />
+                        </label>
+                      )}
+                    </div>
+                  )}
 
                   {reviewing === a._id && (
                     <div className="review-form">

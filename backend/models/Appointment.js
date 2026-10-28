@@ -1,12 +1,17 @@
 const mongoose = require("mongoose");
 
 const appointmentSchema = new mongoose.Schema({
+    // empty for walk-in visits that the doctor adds by hand
     patient: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
-        required: true,
         index: true,
     },
+    walkIn: { type: Boolean, default: false },
+    walkInName: { type: String, trim: true, maxlength: 80 },
+    walkInPhone: { type: String, trim: true, maxlength: 20 },
+    // the doctor suggests the next visit ("YYYY-MM-DD")
+    followUpDate: { type: String },
     doctor: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Doctor",
@@ -29,8 +34,10 @@ const appointmentSchema = new mongoose.Schema({
     cancelledAt: { type: Date },
     // who cancelled (empty = the patient, for older records)
     cancelledBy: { type: String, enum: ["patient", "doctor"] },
-    // payment (Razorpay). "refund-pending" = paid, then cancelled: clinic refunds manually
-    paymentStatus: { type: String, enum: ["unpaid", "paid", "refund-pending"], default: "unpaid" },
+    // payment (Razorpay). "refund-pending" = paid, then cancelled: clinic refunds manually, then marks it "refunded"
+    paymentStatus: { type: String, enum: ["unpaid", "paid", "refund-pending", "refunded"], default: "unpaid" },
+    paidAt: { type: Date },
+    refundedAt: { type: Date },
     razorpayOrderId: { type: String },
     paymentId: { type: String },
     // email reminder already sent?

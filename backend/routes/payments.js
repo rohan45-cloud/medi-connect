@@ -25,6 +25,7 @@ router.get("/config", (req, res) => {
 router.use(requireAuth);
 
 // POST /api/payments/order  { appointmentId }
+// Creates a Razorpay order for the appointment fee. The AMOUNT always comes from our database.
 router.post("/order", async(req, res) => {
     try {
         if (!enabled()) return fail(res, 503, "Online payment is not set up. Please pay at the clinic.");
@@ -70,7 +71,8 @@ router.post("/order", async(req, res) => {
     }
 });
 
-// POST /api/payments/verify
+// POST /api/payments/verify  { appointmentId, razorpay_order_id, razorpay_payment_id, razorpay_signature }
+// The browser says "I paid". We do NOT trust that: we recompute Razorpay's signature with our secret.
 router.post("/verify", async(req, res) => {
     try {
         if (!enabled()) return fail(res, 503, "Online payment is not set up.");
@@ -100,6 +102,7 @@ router.post("/verify", async(req, res) => {
 
         appointment.paymentStatus = "paid";
         appointment.paymentId = razorpay_payment_id;
+        appointment.paidAt = new Date();
         await appointment.save();
 
         const [patient, doctor] = await Promise.all([

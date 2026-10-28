@@ -8,6 +8,8 @@ const doctorPortalRoutes = require("./routes/doctorportal");
 const doctorRoutes = require("./routes/doctors");
 const paymentRoutes = require("./routes/payments");
 const adminRoutes = require("./routes/admin");
+const meRoutes = require("./routes/me");
+const reportRoutes = require("./routes/reports");
 const { startReminderJob } = require("./utils/reminders");
 
 
@@ -41,6 +43,20 @@ app.use("/api/doctor", doctorPortalRoutes);
 app.use("/api/doctors", doctorRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/me", meRoutes);
+app.use("/api/reports", reportRoutes);
+
+// Any error that slips through (too-big upload, broken JSON...) is answered in JSON, never as an HTML page
+app.use((err, req, res, next) => {
+    if (err && err.type === "entity.too.large") {
+        return res.status(413).json({ success: false, message: "That request or file is too large (files: maximum 2 MB)." });
+    }
+    if (err && err.type === "entity.parse.failed") {
+        return res.status(400).json({ success: false, message: "The request could not be read." });
+    }
+    console.error("Unhandled error:", err && err.message);
+    return res.status(500).json({ success: false, message: "Something went wrong. Please try again." });
+});
 
 // MongoDB connection
 mongoose

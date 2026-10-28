@@ -1550,3 +1550,381 @@ img {
         width: 100%;
     }
 }
+
+
+/* ===== NEW FEATURES: favourites, doctor page, files, notes, walk-in, earnings, admin ===== */
+
+.card-top-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+}
+
+.fav-btn {
+    display: inline-grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    background: #fff;
+    color: var(--muted);
+    cursor: pointer;
+}
+
+.fav-btn:hover {
+    color: var(--danger);
+    border-color: var(--danger);
+}
+
+.fav-btn.on {
+    color: var(--danger);
+    border-color: var(--danger);
+    background: #fff1f0;
+}
+
+.fav-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 18px;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--muted);
+    cursor: pointer;
+}
+
+.name-link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.name-link:hover {
+    color: var(--teal-dark);
+    text-decoration: underline;
+}
+
+
+/* doctor page */
+
+.profile-head {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 14px;
+}
+
+.profile-head h2 {
+    margin: 0 0 2px;
+}
+
+.profile-head p {
+    margin: 0;
+}
+
+.profile-avatar {
+    width: 84px;
+    height: 84px;
+    flex: none;
+    overflow: hidden;
+}
+
+.profile-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.profile-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    margin-bottom: 12px;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--muted);
+}
+
+.profile-facts span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.next-slot {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 14px 0;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: var(--mint);
+    color: var(--teal-dark);
+    font-size: 14px;
+}
+
+
+/* follow-up */
+
+.followup {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: var(--mint);
+    color: var(--teal-dark);
+    font-size: 14px;
+}
+
+.followup span {
+    flex: 1 1 200px;
+}
+
+.followup-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px;
+    margin-top: 10px;
+    padding: 12px;
+    border-radius: 12px;
+    background: var(--mint);
+}
+
+.followup-form label {
+    display: grid;
+    gap: 4px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--muted);
+}
+
+.followup-form input {
+    padding: 8px 10px;
+    border: 1px solid #d5e3df;
+    border-radius: 10px;
+    font: inherit;
+}
+
+
+/* files */
+
+.files-panel {
+    margin-top: 10px;
+    padding: 12px;
+    border: 1px dashed #c7dad5;
+    border-radius: 12px;
+}
+
+.file-list,
+.mini-list {
+    display: grid;
+    gap: 8px;
+    margin: 6px 0 10px;
+    padding: 0;
+    list-style: none;
+}
+
+.file-list li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.link-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--teal-dark);
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.link-btn:hover {
+    text-decoration: underline;
+}
+
+.link-btn.danger {
+    color: var(--danger);
+}
+
+.file-pick input {
+    font-size: 13px;
+}
+
+.check-row {
+    display: flex !important;
+    grid-template-columns: none !important;
+    align-items: flex-start;
+    gap: 10px !important;
+}
+
+.check-row input {
+    width: auto !important;
+    margin-top: 3px;
+}
+
+.field-title {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--navy);
+}
+
+
+/* doctor: registration proof, notes, walk-in, earnings */
+
+.cred-box {
+    display: grid;
+    gap: 6px;
+    margin-top: 18px;
+    padding: 14px;
+    border-radius: 14px;
+    background: var(--mint);
+}
+
+.cred-box p {
+    margin: 0;
+}
+
+.visit-details {
+    margin-top: 12px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: #f7faf9;
+    border: 1px solid var(--border);
+}
+
+.visit-details h4 {
+    margin: 12px 0 4px;
+    font-size: 13px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.visit-details h4:first-child {
+    margin-top: 0;
+}
+
+.mini-list li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.note-item {
+    justify-content: space-between;
+    align-items: flex-start !important;
+    flex-wrap: nowrap !important;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: #fff;
+    border: 1px solid var(--border);
+}
+
+.note-item p {
+    margin: 2px 0 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.note-form {
+    display: grid;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.note-form textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px 12px;
+    border: 1px solid #d5e3df;
+    border-radius: 10px;
+    font: inherit;
+    color: var(--navy);
+}
+
+.walkin-tag {
+    margin-left: 8px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #fff3cd;
+    color: #7a5b00;
+    font-size: 11px;
+    font-weight: 800;
+    vertical-align: middle;
+}
+
+.slot-chip.reserved {
+    border-style: dashed;
+    border-color: #d1a100;
+}
+
+.slot-chip.reserved-on {
+    border-color: #d1a100;
+    background: #fff3cd;
+    color: #7a5b00;
+}
+
+.slot-tag {
+    display: block;
+    font-size: 10px;
+    font-weight: 800;
+    color: #7a5b00;
+}
+
+.earn-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.earn-table th,
+.earn-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+}
+
+.earn-table th {
+    color: var(--muted);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+
+/* admin */
+
+.csv-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin: 12px 0;
+}
+
+.csv-bar .booking-hint {
+    margin: 0;
+}
+
+.mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}

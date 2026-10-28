@@ -1,4 +1,5 @@
 const { sendMail } = require("./mailer");
+const { sendSms } = require("./sms");
 
 function when(a) {
     return `${a.date} at ${a.time} (IST)`;
@@ -28,11 +29,30 @@ exports.cancelled = (a, patient, doctor, by) =>
         text: `Hi ${patient.name},\n\nYour appointment with ${doctor.name} on ${when(a)} was cancelled${by === "doctor" ? " by the doctor" : ""}.${a.paymentStatus === "refund-pending" ? "\nYou paid online, so a refund will be processed by the clinic." : ""}\n\n- MediConnect`,
     }));
 
-exports.reminder = (a, patient, doctor) =>
+// Email always; SMS / WhatsApp too when the patient turned it on and saved a phone number.
+exports.reminder = (a, patient, doctor) => {
     fire(sendMail({
         to: patient.email,
         subject: `Reminder: appointment with ${doctor.name} on ${a.date}`,
         text: `Hi ${patient.name},\n\nThis is a reminder of your appointment with ${doctor.name} on ${when(a)}.\n\n- MediConnect`,
+    }));
+    if (patient.smsReminders && patient.phone) {
+        fire(sendSms(patient.phone, `MediConnect reminder: appointment with ${doctor.name} on ${when(a)}.`));
+    }
+};
+
+exports.followUp = (a, patient, doctor) =>
+    fire(sendMail({
+        to: patient.email,
+        subject: `${doctor.name} suggests a follow-up visit on ${a.followUpDate}`,
+        text: `Hi ${patient.name},\n\nAfter your visit on ${when(a)}, ${doctor.name} suggests a follow-up around ${a.followUpDate}.\nYou can book it from "My appointments" -> "Book again".\n\n- MediConnect`,
+    }));
+
+exports.refunded = (a, patient, doctor) =>
+    fire(sendMail({
+        to: patient.email,
+        subject: `Refund processed: Rs ${a.fee}`,
+        text: `Hi ${patient.name},\n\nYour refund of Rs ${a.fee} for the cancelled appointment with ${doctor.name} (${when(a)}) has been processed. It can take a few days to show in your account.\n\n- MediConnect`,
     }));
 
 exports.paymentReceipt = (a, patient, doctor) =>

@@ -1,25 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
-import { X, Stethoscope, CheckCircle2, UserX, Ban } from "lucide-react";
+import { X, Stethoscope, CheckCircle2, UserX, Ban, NotebookPen } from "lucide-react";
 import { apiFetch } from "./api";
 import { formatTime } from "./BookingModal";
 import { ProfileTab, ScheduleTab } from "./DoctorSettings";
+import { VisitDetails, WalkInTab, EarningsTab, formatDate, todayIST } from "./DoctorTools";
 
 const TABS = [
   ["today", "Today"],
   ["upcoming", "Upcoming"],
   ["history", "History"],
+  ["walkin", "Walk-in"],
+  ["earnings", "Earnings"],
   ["profile", "Profile"],
   ["schedule", "Schedule"],
 ];
-
-function formatDate(dateStr) {
-  return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString("en-IN", {
-    timeZone: "UTC",
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-  });
-}
 
 function badgeOf(a) {
   if (a.status === "completed") return ["completed", "Completed"];
@@ -39,6 +33,9 @@ export default function DoctorDashboard({ onClose, onChanged, onAuthError }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState("");
+  const [openId, setOpenId] = useState(""); // visit whose details are open
+  const [completingId, setCompletingId] = useState(""); // visit being completed (follow-up question)
+  const [followUp, setFollowUp] = useState("");
 
   const load = useCallback(
     async (scope) => {
@@ -65,11 +62,13 @@ export default function DoctorDashboard({ onClose, onChanged, onAuthError }) {
   const isListTab = ["today", "upcoming", "history"].includes(tab);
 
   useEffect(() => {
+    setOpenId("");
+    setCompletingId("");
     if (isListTab) load(tab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, load]);
 
-  async function changeStatus(a, status) {
+  async function changeStatus(a, status, followUpDate) {
     if (status === "cancelled") {
       const ok = window.confirm(
         `Cancel ${a.patient?.name || "this patient"}'s appointment on ${formatDate(a.date)} at ${formatTime(a.time)}?`
@@ -81,9 +80,11 @@ export default function DoctorDashboard({ onClose, onChanged, onAuthError }) {
       setError("");
       const res = await apiFetch(`/doctor/appointments/${a._id}/status`, {
         method: "PATCH",
-        body: { status },
+        body: { status, ...(followUpDate ? { followUpDate } : {}) },
       });
       onChanged(res.message || "Updated.");
+      setCompletingId("");
+      setFollowUp("");
       await load(tab);
     } catch (err) {
       if (err.status === 401) return onAuthError();
@@ -150,7 +151,7 @@ export default function DoctorDashboard({ onClose, onChanged, onAuthError }) {
         {info && info.doctor.approved === false && (
           <p className="booking-error" role="status">
             Your profile is waiting for admin approval. Patients can't see or book you yet.
-            You can fill in your profile and schedule meanwhile.
+            Upload your registration document in the Profile tab, and fill in your schedule meanwhile.
           </p>
         )}
 
@@ -186,6 +187,16 @@ export default function DoctorDashboard({ onClose, onChanged, onAuthError }) {
 
         {tab === "profile" && <ProfileTab onChanged={onChanged} onAuthError={onAuthError} />}
         {tab === "schedule" && <ScheduleTab onChanged={onChanged} onAuthError={onAuthError} />}
+        {tab === "earnings" && <EarningsTab onAuthError={onAuthError} />}
+        {tab === "walkin" && (
+          <WalkInTab
+            onChanged={(msg) => {
+              onChanged(msg);
+              apiFetch("/doctor/summary").then((res) => setInfo(res.data)).catch(() => {});
+            }}
+            onAuthError={onAuthError}
+          />
+        )}
 
         {!isListTab ? null : loading ? (
           <p className="booking-hint">Loading...</p>
@@ -199,48 +210,97 @@ export default function DoctorDashboard({ onClose, onChanged, onAuthError }) {
               const started = new Date(a.startAt).getTime() <= Date.now();
               const busy = busyId === a._id;
               return (
-                <li key={a._id} className="appt-item">
-                  <div>
-                    <strong>{a.patient?.name || "Patient"}</strong>
-                    <span className="appt-when">
-                      {formatDate(a.date)} · {formatTime(a.time)}
-                    </span>
-                    {a.reason && <span className="appt-sub">“{a.reason}”</span>}
-                  </div>
+                <li key={a._id} className="appt-item appt-item-col">
+                  <div className="appt-row">
+                    <div>
+                      <strong>
+                        {a.patient?.name || "Patient"}
+                        {a.walkIn && <span className="walkin-tag">Walk-in</span>}
+                      </strong>
+                      <span className="appt-when">
+                        {formatDate(a.date)} · {formatTime(a.time)}
+                      </span>
+                      {a.reason && <span className="appt-sub">“{a.reason}”</span>}
+                      {a.walkIn && a.walkInPhone && <span className="appt-sub">Phone: {a.walkInPhone}</span>}
+                      {a.followUpDate && (
+                        <span className="appt-sub">Follow-up suggested: {formatDate(a.followUpDate)}</span>
+                      )}
+                    </div>
 
-                  <div className="appt-side">
-                    <span className={`appt-badge appt-${kind}`}>{label}</span>
-                    {booked && started && (
+                    <div className="appt-side">
+                      <span className={`appt-badge appt-${kind}`}>{label}</span>
                       <div className="dash-actions">
+                        {booked && started && (
+                          <>
+                            <button
+                              type="button"
+                              className="button button-primary appt-cancel dash-done"
+                              disabled={busy}
+                              onClick={() => {
+                                setCompletingId(completingId === a._id ? "" : a._id);
+                                setFollowUp("");
+                              }}
+                            >
+                              <CheckCircle2 size={14} /> Complete
+                            </button>
+                            <button
+                              type="button"
+                              className="button button-outline appt-cancel"
+                              disabled={busy}
+                              onClick={() => changeStatus(a, "no-show")}
+                            >
+                              <UserX size={14} /> No-show
+                            </button>
+                          </>
+                        )}
+                        {booked && !started && (
+                          <button
+                            type="button"
+                            className="button button-outline appt-cancel"
+                            disabled={busy}
+                            onClick={() => changeStatus(a, "cancelled")}
+                          >
+                            <Ban size={14} /> Cancel
+                          </button>
+                        )}
                         <button
                           type="button"
-                          className="button button-primary appt-cancel dash-done"
-                          disabled={busy}
-                          onClick={() => changeStatus(a, "completed")}
+                          className="button button-outline appt-cancel appt-neutral"
+                          aria-expanded={openId === a._id}
+                          onClick={() => setOpenId(openId === a._id ? "" : a._id)}
                         >
-                          <CheckCircle2 size={14} /> Complete
-                        </button>
-                        <button
-                          type="button"
-                          className="button button-outline appt-cancel"
-                          disabled={busy}
-                          onClick={() => changeStatus(a, "no-show")}
-                        >
-                          <UserX size={14} /> No-show
+                          <NotebookPen size={14} /> Notes
                         </button>
                       </div>
-                    )}
-                    {booked && !started && (
+                    </div>
+                  </div>
+
+                  {completingId === a._id && (
+                    <div className="followup-form">
+                      <label>
+                        Suggest a follow-up visit? (optional)
+                        <input
+                          type="date"
+                          value={followUp}
+                          min={todayIST(1)}
+                          max={todayIST(365)}
+                          onChange={(e) => setFollowUp(e.target.value)}
+                        />
+                      </label>
                       <button
                         type="button"
-                        className="button button-outline appt-cancel"
+                        className="button button-primary"
                         disabled={busy}
-                        onClick={() => changeStatus(a, "cancelled")}
+                        onClick={() => changeStatus(a, "completed", followUp)}
                       >
-                        <Ban size={14} /> Cancel
+                        {followUp ? "Complete + suggest follow-up" : "Complete visit"}
                       </button>
-                    )}
-                  </div>
+                    </div>
+                  )}
+
+                  {openId === a._id && (
+                    <VisitDetails appointment={a} onChanged={onChanged} onAuthError={onAuthError} />
+                  )}
                 </li>
               );
             })}

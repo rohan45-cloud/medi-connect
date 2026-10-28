@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-const API_URL = "https://medi-connect-22m3.onrender.com/api";
+const API_URL = "http://localhost:5000/api";
 
 // Same keys App.jsx uses to read the saved session
 const TOKEN_KEY = "mediconnect_token";
@@ -50,6 +50,7 @@ export default function AuthModal({ onClose, onSuccess, resetToken }) {
   const [name, setName] = useState("");
   // extra fields, only used when a doctor applies
   const [specialty, setSpecialty] = useState("");
+  const [registration, setRegistration] = useState("");
   const [city, setCity] = useState("");
   const [experience, setExperience] = useState("");
   const [fee, setFee] = useState("");
@@ -104,6 +105,7 @@ export default function AuthModal({ onClose, onSuccess, resetToken }) {
           email: cleanEmail,
           password,
           specialty: specialty.trim(),
+          registrationNumber: registration.trim(),
           city: city.trim(),
           experience,
           consultationFee: fee,
@@ -160,7 +162,7 @@ export default function AuthModal({ onClose, onSuccess, resetToken }) {
     login: ["Welcome Back", "Login to MediConnect"],
     register:
       loginAs === "doctor"
-        ? ["Apply as a Doctor", "An admin approves you before patients can see you."]
+        ? ["Apply as a Doctor", "An admin checks your registration before patients can see you."]
         : ["Create Account", "Register for MediConnect"],
     forgot: ["Forgot password?", "We will email you a reset link."],
     reset: ["Choose a new password", "Use at least 8 characters."],
@@ -241,6 +243,15 @@ export default function AuthModal({ onClose, onSuccess, resetToken }) {
                 maxLength={60}
                 value={specialty}
                 onChange={(e) => setSpecialty(e.target.value)}
+                required
+              />
+              <input
+                style={styles.input}
+                placeholder="Medical registration number"
+                minLength={3}
+                maxLength={40}
+                value={registration}
+                onChange={(e) => setRegistration(e.target.value)}
                 required
               />
               <input

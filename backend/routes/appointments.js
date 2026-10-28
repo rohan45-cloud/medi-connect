@@ -5,7 +5,8 @@ const User = require("../models/User");
 const Appointment = require("../models/Appointment");
 const Review = require("../models/Review");
 const requireAuth = require("../middleware/auth");
-const { allTimes, worksOn } = require("../utils/schedule");
+const { patientTimes, worksOn } = require("../utils/schedule");
+const { makePdf } = require("../utils/Pdf");
 const notify = require("../utils/notify");
 
 const router = express.Router();
@@ -60,7 +61,7 @@ function slotProblem(doctor, date, time) {
     const problem = dateProblem(date);
     if (problem) return problem;
     if (!worksOn(doctor, date)) return "This doctor doesn't work on that day.";
-    if (typeof time !== "string" || !allTimes(doctor).includes(time)) return "Please choose a valid time slot.";
+    if (typeof time !== "string" || !patientTimes(doctor).includes(time)) return "Please choose a valid time slot.";
     if (startAtFor(date, time).getTime() < Date.now() + MIN_LEAD_MINUTES * 60000) {
         return "That time is too soon or already passed.";
     }
@@ -94,7 +95,7 @@ router.get("/slots", async(req, res) => {
         const taken = new Set(booked.map((a) => a.time));
         const earliest = Date.now() + MIN_LEAD_MINUTES * 60000;
 
-        const slots = allTimes(doctor).filter(
+        const slots = patientTimes(doctor).filter(
             (time) => !taken.has(time) && startAtFor(date, time).getTime() >= earliest
         );
 
@@ -182,6 +183,8 @@ router.get("/me", async(req, res) => {
                 canReschedule: changeable,
                 canReview: a.status === "completed" && !a.reviewed,
                 canPay: a.status === "booked" && a.paymentStatus === "unpaid" && a.fee > 0,
+                canReceipt: a.paymentStatus === "paid",
+                canAttach: a.status === "booked",
             };
         });
 
@@ -189,6 +192,55 @@ router.get("/me", async(req, res) => {
     } catch (error) {
         console.error("My appointments error:", error.message);
         return fail(res, 500, "Could not load your appointments.");
+    }
+});
+
+// ---------- GET /api/appointments/:id/receipt  (PDF, only after online payment) ----------
+router.get("/:id/receipt", async(req, res) => {
+    try {
+        if (!mongoose.isValidObjectId(req.params.id)) return fail(res, 404, "Appointment not found.");
+
+        const appointment = await Appointment.findOne({ _id: req.params.id, patient: req.userId });
+        if (!appointment) return fail(res, 404, "Appointment not found.");
+        if (appointment.paymentStatus !== "paid") return fail(res, 409, "A receipt is available after an online payment.");
+
+        const [patient, doctor] = await Promise.all([
+            User.findById(req.userId).select("name email"),
+            Doctor.findById(appointment.doctor),
+        ]);
+
+        const paidOn = appointment.paidAt ?
+            new Intl.DateTimeFormat("en-IN", { timeZone: TIME_ZONE, dateStyle: "medium", timeStyle: "short" }).format(appointment.paidAt) :
+            "-";
+        const receiptNo = "MC-" + String(appointment._id).slice(-8).toUpperCase();
+
+        const pdf = makePdf([
+            { text: "MediConnect", size: 24, bold: true, gap: 4 },
+            { text: "Payment receipt", size: 14, gap: 10 },
+            { rule: true },
+            { text: `Receipt no: ${receiptNo}` },
+            { text: `Paid on: ${paidOn} (IST)` },
+            { text: `Payment id: ${appointment.paymentId || "-"}`, gap: 14 },
+            { text: "Patient", bold: true, gap: 4 },
+            { text: `${patient ? patient.name : "-"}  (${patient ? patient.email : "-"})`, gap: 14 },
+            { text: "Consultation", bold: true, gap: 4 },
+            { text: `${doctor ? doctor.name : "Doctor"}${doctor && doctor.specialty ? " - " + doctor.specialty : ""}`, gap: 4 },
+            { text: `Visit: ${appointment.date} at ${appointment.time} (IST)`, gap: 14 },
+            { rule: true },
+            { text: `Amount paid: Rs ${appointment.fee}`, size: 16, bold: true, gap: 12 },
+            { text: "Paid online with Razorpay. Thank you for choosing MediConnect.", size: 10 },
+            { text: "This is a computer-generated receipt and needs no signature.", size: 10 },
+        ], { title: `Receipt ${receiptNo}` });
+
+        res.set({
+            "Content-Type": "application/pdf",
+            "Content-Disposition": `attachment; filename="receipt-${receiptNo}.pdf"`,
+            "Cache-Control": "private, no-store",
+        });
+        return res.end(pdf);
+    } catch (error) {
+        console.error("Receipt error:", error.message);
+        return fail(res, 500, "Could not create the receipt.");
     }
 });
 

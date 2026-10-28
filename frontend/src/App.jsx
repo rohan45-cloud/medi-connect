@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from "react";
 import {
   HeartPulse,
@@ -12,6 +13,8 @@ import {
   LayoutDashboard,
   ShieldCheck as ShieldIcon,
   MapPin,
+  Heart,
+  UserRound,
   X,
 } from "lucide-react";
 import AuthModal from "./AuthModal";
@@ -19,11 +22,12 @@ import BookingModal from "./BookingModal";
 import MyAppointments from "./MyAppointments";
 import DoctorDashboard from "./DoctorDashboard";
 import AdminPanel from "./AdminPanel";
-import DoctorReviews from "./DoctorReviews";
+import DoctorProfile from "./DoctorProfile";
+import MyProfile from "./MyProfile";
 import { apiFetch } from "./api";
 import "./index.css";
 
-const API_URL = "https://medi-connect-22m3.onrender.com/api";
+const API_URL = "http://localhost:5000/api";
 
 export default function App() {
   const [doctors, setDoctors] = useState([]);
@@ -37,7 +41,10 @@ export default function App() {
   const [showDoctorDashboard, setShowDoctorDashboard] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const [reschedule, setReschedule] = useState(null); // { appointment, doctor }
-  const [reviewsDoctor, setReviewsDoctor] = useState(null);
+  const [profileDoctor, setProfileDoctor] = useState(null);
+  const [showProfile, setShowProfile] = useState(false);
+  const [favorites, setFavorites] = useState([]); // doctor ids the patient saved
+  const [onlyFavorites, setOnlyFavorites] = useState(false);
   const [city, setCity] = useState("All");
   const [maxFee, setMaxFee] = useState("any");
   const [sortBy, setSortBy] = useState("rating");
@@ -79,6 +86,48 @@ export default function App() {
     fetchDoctors();
   }, []);
 
+  // Saved doctors (patients only)
+  useEffect(() => {
+    if (!currentUser || (currentUser.role || "patient") !== "patient") {
+      setFavorites([]);
+      setOnlyFavorites(false);
+      return;
+    }
+    apiFetch("/me/favorites")
+      .then((res) => setFavorites(res.data))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, currentUser?.role]);
+
+  async function toggleFavorite(doctor) {
+    const saved = favorites.includes(doctor._id);
+    try {
+      await apiFetch(`/me/favorites/${doctor._id}`, { method: saved ? "DELETE" : "PUT" });
+      setFavorites(saved ? favorites.filter((id) => id !== doctor._id) : [...favorites, doctor._id]);
+      showDemoNotice(saved ? "Removed from favourites." : "Saved to favourites.");
+    } catch (err) {
+      if (err.status === 401) return handleSessionExpired();
+      showDemoNotice(err.message);
+    }
+  }
+
+  // Starts a booking with the doctor's latest working days / fee (not the page-load copy)
+  function startBooking(doctor) {
+    if (!currentUser) {
+      setShowAuth(true);
+      showDemoNotice("Please log in to continue.");
+    } else if (isDoctor || isAdmin) {
+      showDemoNotice("Only patient accounts can book visits.");
+    } else if (doctor.available) {
+      setProfileDoctor(null);
+      apiFetch(`/doctors/${doctor._id}`)
+        .then((res) => setBookingDoctor(res.data))
+        .catch(() => setBookingDoctor(doctor));
+    } else {
+      showDemoNotice("This doctor is currently unavailable.");
+    }
+  }
+
   function showDemoNotice(message) {
     setNotice(message);
     window.setTimeout(() => setNotice(""), 3500);
@@ -112,6 +161,7 @@ export default function App() {
 
   const isDoctor = currentUser?.role === "doctor";
   const isAdmin = currentUser?.role === "admin";
+  const isPatient = Boolean(currentUser) && !isDoctor && !isAdmin;
 
   const specialties = [
     "All",
@@ -144,7 +194,9 @@ export default function App() {
     const matchesFee =
       maxFee === "any" || (doctor.consultationFee ?? 0) <= Number(maxFee);
 
-    return matchesSearch && matchesSpecialty && matchesCity && matchesFee;
+    const matchesFavorite = !onlyFavorites || favorites.includes(doctor._id);
+
+    return matchesSearch && matchesSpecialty && matchesCity && matchesFee && matchesFavorite;
   }).sort(sorters[sortBy]);
 
   return (
@@ -189,6 +241,15 @@ export default function App() {
                   onClick={() => setShowAppointments(true)}
                 >
                   <CalendarCheck size={16} /> My appointments
+                </button>
+              )}
+              {isPatient && (
+                <button
+                  type="button"
+                  className="button button-outline"
+                  onClick={() => setShowProfile(true)}
+                >
+                  <UserRound size={16} /> Profile
                 </button>
               )}
               <span className="welcome-user">
@@ -412,6 +473,17 @@ export default function App() {
             </select>
           </div>
 
+          {isPatient && (
+            <label className="fav-filter">
+              <input
+                type="checkbox"
+                checked={onlyFavorites}
+                onChange={(event) => setOnlyFavorites(event.target.checked)}
+              />
+              <Heart size={15} /> Show only my saved doctors ({favorites.length})
+            </label>
+          )}
+
           {loading && (
             <div className="empty-state">
               <p>Loading doctors from the database...</p>
@@ -444,6 +516,7 @@ export default function App() {
                   setSpecialty("All");
                   setCity("All");
                   setMaxFee("any");
+                  setOnlyFavorites(false);
                 }}
               >
                 Clear filters
@@ -464,18 +537,46 @@ export default function App() {
                       )}
                     </div>
 
-                    <span
-                      className={
-                        doctor.available
-                          ? "availability available"
-                          : "availability unavailable"
-                      }
-                    >
-                      {doctor.available ? "Available" : "Unavailable"}
-                    </span>
+                    <div className="card-top-right">
+                      <span
+                        className={
+                          doctor.available
+                            ? "availability available"
+                            : "availability unavailable"
+                        }
+                      >
+                        {doctor.available ? "Available" : "Unavailable"}
+                      </span>
+                      {isPatient && (
+                        <button
+                          type="button"
+                          className={favorites.includes(doctor._id) ? "fav-btn on" : "fav-btn"}
+                          aria-pressed={favorites.includes(doctor._id)}
+                          aria-label={
+                            favorites.includes(doctor._id)
+                              ? `Remove ${doctor.name} from favourites`
+                              : `Save ${doctor.name} to favourites`
+                          }
+                          onClick={() => toggleFavorite(doctor)}
+                        >
+                          <Heart
+                            size={18}
+                            fill={favorites.includes(doctor._id) ? "currentColor" : "none"}
+                          />
+                        </button>
+                      )}
+                    </div>
                   </div>
 
-                  <h3>{doctor.name}</h3>
+                  <h3>
+                    <button
+                      type="button"
+                      className="name-link"
+                      onClick={() => setProfileDoctor(doctor)}
+                    >
+                      {doctor.name}
+                    </button>
+                  </h3>
                   <p className="doctor-specialty">
                     {doctor.specialty || "General Physician"}
                   </p>
@@ -490,7 +591,7 @@ export default function App() {
                     <button
                       type="button"
                       className="rating-link"
-                      onClick={() => setReviewsDoctor(doctor)}
+                      onClick={() => setProfileDoctor(doctor)}
                       aria-label={`See reviews of ${doctor.name}`}
                     >
                       <Star size={15} fill="currentColor" />
@@ -512,21 +613,7 @@ export default function App() {
                     <button
                       type="button"
                       className="button button-primary doctor-action"
-                      onClick={() => {
-                        if (!currentUser) {
-                          setShowAuth(true);
-                          showDemoNotice("Please log in to continue.");
-                        } else if (isDoctor || isAdmin) {
-                          showDemoNotice("Only patient accounts can book visits.");
-                        } else if (doctor.available) {
-                          // use the doctor's latest working days / fee, not the page-load copy
-                          apiFetch(`/doctors/${doctor._id}`)
-                            .then((res) => setBookingDoctor(res.data))
-                            .catch(() => setBookingDoctor(doctor));
-                        } else {
-                          showDemoNotice("This doctor is currently unavailable.");
-                        }
-                      }}
+                      onClick={() => startBooking(doctor)}
                     >
                       {currentUser ? (isDoctor || isAdmin ? "Staff account" : "Book visit") : "Get started"}
                     </button>
@@ -614,6 +701,15 @@ export default function App() {
               showDemoNotice(err.message);
             }
           }}
+          onBookAgain={async (doctorId) => {
+            try {
+              const res = await apiFetch(`/doctors/${doctorId}`);
+              setShowAppointments(false);
+              startBooking(res.data);
+            } catch (err) {
+              showDemoNotice(err.message);
+            }
+          }}
           onClose={() => setShowAppointments(false)}
           onChanged={showDemoNotice}
           onAuthError={handleSessionExpired}
@@ -634,8 +730,25 @@ export default function App() {
         />
       )}
 
-      {reviewsDoctor && (
-        <DoctorReviews doctor={reviewsDoctor} onClose={() => setReviewsDoctor(null)} />
+      {profileDoctor && (
+        <DoctorProfile
+          doctor={profileDoctor}
+          onClose={() => setProfileDoctor(null)}
+          onBook={isDoctor || isAdmin ? undefined : startBooking}
+          isFavorite={favorites.includes(profileDoctor._id)}
+          onToggleFavorite={isPatient ? toggleFavorite : undefined}
+        />
+      )}
+
+      {showProfile && isPatient && (
+        <MyProfile
+          onClose={() => setShowProfile(false)}
+          onSaved={(user, message) => {
+            if (user) setCurrentUser(user);
+            showDemoNotice(message);
+          }}
+          onAuthError={handleSessionExpired}
+        />
       )}
 
       {showAdmin && isAdmin && (

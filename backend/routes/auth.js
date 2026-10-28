@@ -113,7 +113,7 @@ router.post("/register", registerLimiter, async(req, res) => {
 router.post("/register-doctor", registerLimiter, async(req, res) => {
     let createdUser = null;
     try {
-        const { name, email, password, specialty, city, experience, consultationFee } = req.body;
+        const { name, email, password, specialty, city, experience, consultationFee, registrationNumber } = req.body;
 
         if (typeof name !== "string" || typeof email !== "string" || typeof password !== "string" || typeof specialty !== "string") {
             return res.status(400).json({ success: false, message: "Name, email, password and specialty are required." });
@@ -133,6 +133,10 @@ router.post("/register-doctor", registerLimiter, async(req, res) => {
         }
         if (password.length < 8 || password.length > 72) {
             return res.status(400).json({ success: false, message: "Password must be 8–72 characters long." });
+        }
+        const cleanReg = typeof registrationNumber === "string" ? registrationNumber.trim() : "";
+        if (cleanReg.length < 3 || cleanReg.length > 40) {
+            return res.status(400).json({ success: false, message: "Please enter your medical registration number (3–40 characters)." });
         }
 
         const fee = consultationFee === undefined || consultationFee === "" ? 500 : Number(consultationFee);
@@ -162,6 +166,7 @@ router.post("/register-doctor", registerLimiter, async(req, res) => {
             name: cleanName,
             specialty: cleanSpecialty,
             city: (city || "").trim(),
+            registrationNumber: cleanReg,
             experience: Math.round(exp),
             consultationFee: Math.round(fee),
             approved: false, // hidden until an admin approves
@@ -222,6 +227,13 @@ router.post("/login", loginLimiter, async(req, res) => {
             return res.status(401).json({
                 success: false,
                 message: "Invalid email or password.",
+            });
+        }
+
+        if (user.blocked) {
+            return res.status(403).json({
+                success: false,
+                message: "This account has been blocked. Please contact the clinic.",
             });
         }
 

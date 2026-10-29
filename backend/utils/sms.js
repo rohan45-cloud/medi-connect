@@ -27,7 +27,7 @@ const configured = () =>
 function params(wrap, phone, text, whatsapp) {
     const p = { To: wrap(phone), From: wrap(process.env.TWILIO_FROM) };
     if (whatsapp && process.env.TWILIO_CONTENT_SID) {
-        p.ContentSid = process.env.TWILIO_CONTENT_SID;
+        p.ContentSid = String(process.env.TWILIO_CONTENT_SID).trim().replace(/^["']|["']$/g, "");
         // WhatsApp template variables can't contain new lines
         p.ContentVariables = JSON.stringify({ 1: String(text).replace(/\s*\n+\s*/g, " ").trim() });
     } else {
@@ -46,7 +46,8 @@ async function sendSms(to, text) {
     }
 
     try {
-        const whatsapp = process.env.TWILIO_CHANNEL === "whatsapp";
+        const clean = (v) => String(v || "").trim().replace(/^["']|["']$/g, "");
+        const whatsapp = clean(process.env.TWILIO_CHANNEL).toLowerCase() === "whatsapp";
         const wrap = (n) => (whatsapp ? `whatsapp:${n}` : n);
         const sid = process.env.TWILIO_ACCOUNT_SID;
         const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
@@ -58,7 +59,10 @@ async function sendSms(to, text) {
             body: params(wrap, phone, text, whatsapp).toString(),
         });
         if (!response.ok) {
-            console.error("SMS failed:", response.status, (await response.text()).slice(0, 200));
+            console.error(
+                "SMS failed:", response.status, (await response.text()).slice(0, 200),
+                `| mode: ${whatsapp ? "whatsapp" : "sms"}, template: ${process.env.TWILIO_CONTENT_SID ? "set" : "NOT SET"}`
+            );
             return false;
         }
         return true;

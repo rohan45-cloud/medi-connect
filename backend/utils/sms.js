@@ -5,6 +5,8 @@
 //   TWILIO_AUTH_TOKEN=xxxxxxxx
 //   TWILIO_FROM=+1415xxxxxxx            (your Twilio number; for WhatsApp the sandbox number)
 //   TWILIO_CHANNEL=whatsapp             (optional: send on WhatsApp instead of SMS)
+//   TWILIO_CONTENT_SID=HXxxxxxxxx       (optional: a WhatsApp template with ONE variable {{1}}; use it when
+//                                        Twilio says "ContentSid Required")
 //
 // Without those, the message is only printed in the backend terminal (development mode).
 
@@ -20,6 +22,19 @@ function normalizePhone(raw) {
 
 const configured = () =>
     Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM);
+
+// Normal message: plain Body. With TWILIO_CONTENT_SID (WhatsApp only): the whole text goes into template variable {{1}}.
+function params(wrap, phone, text, whatsapp) {
+    const p = { To: wrap(phone), From: wrap(process.env.TWILIO_FROM) };
+    if (whatsapp && process.env.TWILIO_CONTENT_SID) {
+        p.ContentSid = process.env.TWILIO_CONTENT_SID;
+        // WhatsApp template variables can't contain new lines
+        p.ContentVariables = JSON.stringify({ 1: String(text).replace(/\s*\n+\s*/g, " ").trim() });
+    } else {
+        p.Body = text;
+    }
+    return new URLSearchParams(p);
+}
 
 async function sendSms(to, text) {
     const phone = normalizePhone(to);
@@ -40,7 +55,7 @@ async function sendSms(to, text) {
                 "Content-Type": "application/x-www-form-urlencoded",
                 Authorization: "Basic " + Buffer.from(`${sid}:${process.env.TWILIO_AUTH_TOKEN}`).toString("base64"),
             },
-            body: new URLSearchParams({ To: wrap(phone), From: wrap(process.env.TWILIO_FROM), Body: text }).toString(),
+            body: params(wrap, phone, text, whatsapp).toString(),
         });
         if (!response.ok) {
             console.error("SMS failed:", response.status, (await response.text()).slice(0, 200));

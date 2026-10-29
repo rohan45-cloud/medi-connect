@@ -6,7 +6,7 @@ const Appointment = require("../models/Appointment");
 const Review = require("../models/Review");
 const requireAuth = require("../middleware/auth");
 const { patientTimes, worksOn } = require("../utils/schedule");
-const { makePdf } = require("../utils/pdf");
+const pdf = require('../utils/pdf');
 const notify = require("../utils/notify");
 
 const router = express.Router();

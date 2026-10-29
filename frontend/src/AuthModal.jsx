@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-const API_URL = "https://medi-connect-1-4ugc.onrender.com/api";
+const API_URL = "http://localhost:5000/api";
 
 // Same keys App.jsx uses to read the saved session
 const TOKEN_KEY = "mediconnect_token";
@@ -43,7 +43,7 @@ const ROLE_LABELS = {
 
 // Props: onClose(), onSuccess(user, token), resetToken (set when the user opened the emailed reset link)
 export default function AuthModal({ onClose, onSuccess, resetToken }) {
-  // "login" | "register" | "forgot" | "reset"
+  // "login" | "register" | "forgot" | "reset" | "resetPhone"
   const [mode, setMode] = useState(resetToken ? "reset" : "login");
   // who is logging in: "patient" | "doctor" | "admin" (the server still decides the real role)
   const [loginAs, setLoginAs] = useState("patient");
@@ -56,6 +56,7 @@ export default function AuthModal({ onClose, onSuccess, resetToken }) {
   const [fee, setFee] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
   const [message, setMessage] = useState("");
   const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(false);
@@ -80,6 +81,25 @@ export default function AuthModal({ onClose, onSuccess, resetToken }) {
 
       if (mode === "forgot") {
         const res = await post("/auth/forgot-password", { email: cleanEmail });
+        setInfo(res.message);
+        // a phone number was entered: ask for the SMS code next
+        if (res.via === "phone") {
+          setCode("");
+          setPassword("");
+          setMode("resetPhone");
+        }
+        return;
+      }
+
+      if (mode === "resetPhone") {
+        const res = await post("/auth/reset-password-phone", {
+          phone: cleanEmail,
+          code: code.trim(),
+          password,
+        });
+        setPassword("");
+        setCode("");
+        setMode("login");
         setInfo(res.message);
         return;
       }
@@ -164,7 +184,8 @@ export default function AuthModal({ onClose, onSuccess, resetToken }) {
       loginAs === "doctor"
         ? ["Apply as a Doctor", "An admin checks your registration before patients can see you."]
         : ["Create Account", "Register for MediConnect"],
-    forgot: ["Forgot password?", "We will email you a reset link."],
+    forgot: ["Forgot password?", "Enter your email or phone number. We send a reset link or SMS code."],
+    resetPhone: ["Enter the code", "Type the 6-digit code we sent to your phone and choose a new password."],
     reset: ["Choose a new password", "Use at least 8 characters."],
   };
 
@@ -237,7 +258,7 @@ export default function AuthModal({ onClose, onSuccess, resetToken }) {
 
           {applyingAsDoctor && (
             <>
-              <input
+                          <input
                 style={styles.input}
                 placeholder="Specialty (e.g. Cardiologist)"
                 maxLength={60}
@@ -287,11 +308,25 @@ export default function AuthModal({ onClose, onSuccess, resetToken }) {
           {mode !== "reset" && (
             <input
               style={styles.input}
-              type="email"
-              placeholder="Email Address"
-              autoComplete="email"
+              type={isRegister ? "email" : "text"}
+              placeholder={isRegister ? "Email Address" : "Email or phone number"}
+              autoComplete={isRegister ? "email" : "username"}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+          )}
+
+          {mode === "resetPhone" && (
+            <input
+              style={styles.input}
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              placeholder="6-digit code"
+              autoComplete="one-time-code"
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
               required
             />
           )}
@@ -301,12 +336,12 @@ export default function AuthModal({ onClose, onSuccess, resetToken }) {
               style={styles.input}
               type="password"
               placeholder={
-                mode === "reset"
+                mode === "reset" || mode === "resetPhone"
                   ? "New password (minimum 8 characters)"
                   : "Password (minimum 8 characters)"
               }
               autoComplete={
-                isRegister || mode === "reset" ? "new-password" : "current-password"
+                isRegister || mode === "reset" || mode === "resetPhone" ? "new-password" : "current-password"
               }
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -334,8 +369,8 @@ export default function AuthModal({ onClose, onSuccess, resetToken }) {
                 ? "Apply as doctor"
                 : "Register"
               : mode === "forgot"
-              ? "Send reset link"
-              : mode === "reset"
+              ? "Send reset link / code"
+              : mode === "reset" || mode === "resetPhone"
               ? "Change password"
               : "Login"}
           </button>
@@ -353,7 +388,15 @@ export default function AuthModal({ onClose, onSuccess, resetToken }) {
           </p>
         )}
 
-        {mode !== "reset" && !(mode === "login" && loginAs === "admin") && (
+        {mode === "resetPhone" && (
+          <p>
+            <button type="button" style={styles.link} onClick={() => switchMode("login")}>
+              Back to login
+            </button>
+          </p>
+        )}
+
+        {mode !== "reset" && mode !== "resetPhone" && !(mode === "login" && loginAs === "admin") && (
           <p>
             {isRegister ? "Already registered?" : mode === "forgot" ? "Remembered it?" : "Don't have an account?"}{" "}
             <button

@@ -6,12 +6,15 @@ const User = require("../models/User");
 const Doctor = require("../models/Doctor");
 const rateLimit = require("../middleware/rateLimit");
 const notify = require("../utils/notify");
+const { normalizePhone, sendSms } = require("../utils/sms");
+const { OTP_MINUTES, MAX_TRIES, newCode, hashCode, sameHash } = require("../utils/otp");
 
 const router = express.Router();
 
 // brute-force protection (per IP)
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: "Too many login attempts. Please try again in 15 minutes." });
 const registerLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 20, message: "Too many sign-ups from this network. Please try again later." });
+const resetLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: "Too many attempts. Please try again in 15 minutes." });
 const forgotLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 5, message: "Too many reset requests. Please try again in an hour." });
 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
@@ -206,10 +209,15 @@ router.post("/login", loginLimiter, async(req, res) => {
             });
         }
 
-        const cleanEmail = email.trim().toLowerCase();
-
-        const user = await User.findOne({ email: cleanEmail })
-            .select("+password");
+        // the same box takes an email OR a phone number (phone login only works for VERIFIED numbers)
+        const loginId = email.trim();
+        let user = null;
+        if (loginId.includes("@")) {
+            user = await User.findOne({ email: loginId.toLowerCase() }).select("+password");
+        } else {
+            const phone = normalizePhone(loginId);
+            if (phone) user = await User.findOne({ phone, phoneVerified: true }).select("+password");
+        }
 
         if (!user) {
             return res.status(401).json({
@@ -259,20 +267,49 @@ router.post("/login", loginLimiter, async(req, res) => {
     }
 });
 
-// Forgot password: ALWAYS answers the same, so nobody can find out which emails exist.
+// Forgot password: ALWAYS answers the same, so nobody can find out which emails / numbers exist.
+// { email } can be an email address (we send a reset link) or a phone number (we send a 6-digit code).
 router.post("/forgot-password", forgotLimiter, async(req, res) => {
-    const generic = {
-        success: true,
-        message: "If an account exists for that email, a reset link has been sent.",
-    };
-
     try {
         const { email } = req.body;
         if (typeof email !== "string" || !email.trim()) {
-            return res.status(400).json({ success: false, message: "Please enter your email." });
+            return res.status(400).json({ success: false, message: "Please enter your email or phone number." });
+        }
+        const value = email.trim();
+
+        // ----- by phone: SMS / WhatsApp code -----
+        if (!value.includes("@")) {
+            const phone = normalizePhone(value);
+            if (!phone) {
+                return res.status(400).json({ success: false, message: "Please enter a valid email or phone number." });
+            }
+            const genericPhone = {
+                success: true,
+                via: "phone",
+                message: `If a verified number matches, a 6-digit code has been sent. It works for ${OTP_MINUTES} minutes.`,
+            };
+
+            const user = await User.findOne({ phone, phoneVerified: true });
+            if (!user) return res.json(genericPhone);
+
+            const code = newCode();
+            user.resetOtpHash = hashCode(code, "reset", user._id);
+            user.resetOtpExpires = new Date(Date.now() + OTP_MINUTES * 60 * 1000);
+            user.resetOtpTries = 0;
+            await user.save();
+
+            await sendSms(user.phone, `MediConnect password reset code: ${code}. Valid for ${OTP_MINUTES} minutes. Do not share it.`);
+            return res.json(genericPhone);
         }
 
-        const user = await User.findOne({ email: email.trim().toLowerCase() });
+        // ----- by email: reset link -----
+        const generic = {
+            success: true,
+            via: "email",
+            message: "If an account exists for that email, a reset link has been sent.",
+        };
+
+        const user = await User.findOne({ email: value.toLowerCase() });
         if (!user) return res.json(generic);
 
         const token = crypto.randomBytes(32).toString("hex");
@@ -287,6 +324,48 @@ router.post("/forgot-password", forgotLimiter, async(req, res) => {
     } catch (error) {
         console.error("Forgot password error:", error.message);
         return res.status(500).json({ success: false, message: "Could not start the reset. Please try again." });
+    }
+});
+
+// Reset password with the SMS / WhatsApp code: { phone, code, password }
+router.post("/reset-password-phone", resetLimiter, async(req, res) => {
+    try {
+        const { phone, code, password } = req.body;
+        const bad = (message) => res.status(400).json({ success: false, message });
+
+        if (typeof phone !== "string" || typeof code !== "string" || typeof password !== "string") {
+            return bad("Phone number, code and new password are required.");
+        }
+        if (password.length < 8 || password.length > 72) return bad("Password must be 8–72 characters long.");
+        const normal = normalizePhone(phone);
+        if (!normal || !/^\d{6}$/.test(code.trim())) return bad("That code is invalid or has expired.");
+
+        const user = await User.findOne({ phone: normal, phoneVerified: true })
+            .select("+resetOtpHash +resetOtpExpires +resetOtpTries");
+
+        if (!user || !user.resetOtpHash || !user.resetOtpExpires || user.resetOtpExpires.getTime() <= Date.now()) {
+            return bad("That code is invalid or has expired.");
+        }
+        if ((user.resetOtpTries || 0) >= MAX_TRIES) return bad("Too many wrong tries. Please ask for a new code.");
+
+        if (!sameHash(hashCode(code.trim(), "reset", user._id), user.resetOtpHash)) {
+            user.resetOtpTries = (user.resetOtpTries || 0) + 1;
+            await user.save();
+            return bad("That code is invalid or has expired.");
+        }
+
+        user.password = await bcrypt.hash(password, 12);
+        user.resetOtpHash = undefined;
+        user.resetOtpExpires = undefined;
+        user.resetOtpTries = 0;
+        user.resetTokenHash = undefined;
+        user.resetTokenExpires = undefined;
+        await user.save();
+
+        return res.json({ success: true, message: "Password changed. You can log in now." });
+    } catch (error) {
+        console.error("Phone reset error:", error.message);
+        return res.status(500).json({ success: false, message: "Could not reset the password. Please try again." });
     }
 });
 

@@ -7,10 +7,18 @@ export default function MyProfile({ onClose, onSaved, onAuthError }) {
   const [form, setForm] = useState(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  // the phone number as it is saved on the server (the input may differ while typing)
+  const [savedPhone, setSavedPhone] = useState("");
+  const [code, setCode] = useState("");
+  const [info, setInfo] = useState("");
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     apiFetch("/me/profile")
-      .then((res) => setForm(res.data))
+      .then((res) => {
+        setForm(res.data);
+        setSavedPhone(res.data.phone || "");
+      })
       .catch((err) => (err.status === 401 ? onAuthError() : setError(err.message)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -19,12 +27,15 @@ export default function MyProfile({ onClose, onSaved, onAuthError }) {
     e.preventDefault();
     setSaving(true);
     setError("");
+    setInfo("");
     try {
       const res = await apiFetch("/me/profile", {
         method: "PATCH",
         body: { name: form.name, phone: form.phone, smsReminders: form.smsReminders },
       });
       setForm(res.data);
+      setSavedPhone(res.data.phone || "");
+      setCode("");
 
       // keep the saved login in sync, so the new name shows in the navbar
       try {
@@ -35,7 +46,12 @@ export default function MyProfile({ onClose, onSaved, onAuthError }) {
       } catch {
         onSaved(null, "Profile saved.");
       }
-      onClose();
+      // a saved but unverified number: stay open so the person can verify it now
+      if (res.data.phone && !res.data.phoneVerified) {
+        setInfo("Saved. Now verify your number below to log in or reset your password with it.");
+      } else {
+        onClose();
+      }
     } catch (err) {
       if (err.status === 401) return onAuthError();
       setError(err.message);
@@ -43,6 +59,40 @@ export default function MyProfile({ onClose, onSaved, onAuthError }) {
       setSaving(false);
     }
   }
+
+  async function sendCode() {
+    setBusy(true);
+    setError("");
+    setInfo("");
+    try {
+      const res = await apiFetch("/me/phone/send-code", { method: "POST" });
+      setInfo(res.message || "Code sent.");
+    } catch (err) {
+      if (err.status === 401) return onAuthError();
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verifyCode() {
+    setBusy(true);
+    setError("");
+    setInfo("");
+    try {
+      const res = await apiFetch("/me/phone/verify", { method: "POST", body: { code: code.trim() } });
+      setForm((f) => ({ ...f, phoneVerified: true }));
+      setCode("");
+      setInfo(res.message || "Phone number verified.");
+    } catch (err) {
+      if (err.status === 401) return onAuthError();
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const phoneChanged = form ? (form.phone || "").trim() !== savedPhone : false;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -91,6 +141,41 @@ export default function MyProfile({ onClose, onSaved, onAuthError }) {
                 onChange={(e) => setForm({ ...form, phone: e.target.value })}
               />
             </label>
+
+            {savedPhone && !phoneChanged && form.phoneVerified && (
+              <p className="booking-hint">✔ Phone verified. You can log in and reset your password with it.</p>
+            )}
+            {savedPhone && !phoneChanged && !form.phoneVerified && (
+              <div className="booking-hint">
+                <p style={{ margin: "0 0 8px" }}>Not verified yet. We will text you a 6-digit code.</p>
+                <button type="button" className="button button-secondary" onClick={sendCode} disabled={busy}>
+                  Send code
+                </button>
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    placeholder="6-digit code"
+                    aria-label="Verification code"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+                  />
+                  <button
+                    type="button"
+                    className="button button-primary"
+                    onClick={verifyCode}
+                    disabled={busy || code.length !== 6}
+                  >
+                    Verify
+                  </button>
+                </div>
+              </div>
+            )}
+            {phoneChanged && (
+              <p className="booking-hint">Save the profile first, then you can verify the new number.</p>
+            )}
+
             <label className="check-row">
               <input
                 type="checkbox"
@@ -101,6 +186,7 @@ export default function MyProfile({ onClose, onSaved, onAuthError }) {
             </label>
 
             {error && <p className="booking-error" role="alert">{error}</p>}
+            {info && <p className="booking-hint" role="status">{info}</p>}
             <button type="submit" className="button button-primary" disabled={saving}>
               {saving ? "Saving..." : "Save profile"}
             </button>

@@ -3,6 +3,7 @@ import { X, CalendarCheck, Star, Receipt, Paperclip, Trash2, Download, RotateCcw
 import { apiFetch, apiUpload, apiDownload } from "./api";
 import { formatTime } from "./BookingModal";
 import { paymentsEnabled, payForAppointment } from "./payments";
+import VideoButton from "./VideoButton";
 
 function formatDate(dateStr) {
   return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString("en-IN", {
@@ -220,6 +221,7 @@ export default function MyAppointments({
                         </span>
                       )}
                       <div className="dash-actions">
+                                                <VideoButton appointment={a} onError={setError} onAuthError={onAuthError} />
                         {payOn && a.canPay && (
                           <button
                             type="button"

@@ -4,12 +4,13 @@ const dotenv = require("dotenv");
 const mongoose = require("mongoose");
 const authRoutes = require("./routes/auth");
 const appointmentRoutes = require("./routes/appointments");
-const doctorPortalRoutes = require("./routes/doctorportal");
+const doctorPortalRoutes = require("./routes/doctorPortal");
 const doctorRoutes = require("./routes/doctors");
 const paymentRoutes = require("./routes/payments");
 const adminRoutes = require("./routes/admin");
 const meRoutes = require("./routes/me");
 const reportRoutes = require("./routes/reports");
+const videoRoutes = require("./routes/video");
 const { startReminderJob } = require("./utils/reminders");
 
 
@@ -45,6 +46,7 @@ app.use("/api/payments", paymentRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/me", meRoutes);
 app.use("/api/reports", reportRoutes);
+app.use("/api/video", videoRoutes);
 
 // Any error that slips through (too-big upload, broken JSON...) is answered in JSON, never as an HTML page
 app.use((err, req, res, next) => {

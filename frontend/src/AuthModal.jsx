@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-const API_URL = "https://medi-connect-22m3.onrender.com/api";
+const API_URL = "http://localhost:5000/api";
 
 // Same keys App.jsx uses to read the saved session
 const TOKEN_KEY = "mediconnect_token";

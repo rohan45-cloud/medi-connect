@@ -4,6 +4,7 @@ import { apiFetch } from "./api";
 import { formatTime } from "./BookingModal";
 import { ProfileTab, ScheduleTab } from "./DoctorSettings";
 import { VisitDetails, WalkInTab, EarningsTab, formatDate, todayIST } from "./DoctorTools";
+import VideoButton from "./VideoButton";
 
 const TABS = [
   ["today", "Today"],
@@ -230,6 +231,8 @@ export default function DoctorDashboard({ onClose, onChanged, onAuthError }) {
                     <div className="appt-side">
                       <span className={`appt-badge appt-${kind}`}>{label}</span>
                       <div className="dash-actions">
+
+                                                <VideoButton appointment={a} onError={setError} onAuthError={onAuthError} />
                         {booked && started && (
                           <>
                             <button

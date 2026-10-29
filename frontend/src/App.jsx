@@ -27,7 +27,7 @@ import MyProfile from "./MyProfile";
 import { apiFetch } from "./api";
 import "./index.css";
 
-const API_URL = "http://localhost:5000/api";
+const API_URL = "https://medi-connect-1-4ugc.onrender.com/api";
 
 export default function App() {
   const [doctors, setDoctors] = useState([]);

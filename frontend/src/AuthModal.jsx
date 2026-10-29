@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+const API_URL = import.meta.env.VITE_API_URL || "https://medi-connect-1-2mr4.onrender.com/api";
 
 // Same keys App.jsx uses to read the saved session
 const TOKEN_KEY = "mediconnect_token";

@@ -1,5 +1,5 @@
 export const API_URL =
-    import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+    import.meta.env.VITE_API_URL || "https://medi-connect-1-2mr4.onrender.com/api";
 export const TOKEN_KEY = "mediconnect_token";
 export const USER_KEY = "mediconnect_user";
 
